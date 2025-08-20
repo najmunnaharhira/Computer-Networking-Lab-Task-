@@ -3,19 +3,23 @@ import argparse
 import pathlib
 import socket
 
-BUFSIZE = 1024  # define buffer size (adjust as needed)
+BUFSIZE = 4096
 
 def recv_line(sock):
-    data = b""
-    while not data.endswith(b"\n"):
-        chunk = sock.recv(1)
-        if not chunk:
-            raise ConnectionError("Connection closed while reading line")
-        data += chunk
-    return data.decode().strip()
+    data = bytearray()
+    while True:
+        ch = sock.recv(1)
+        if not ch:
+            if not data:
+                return ""
+            break
+        data += ch
+        if data.endswith(b"\n"):
+            break
+    return data.decode("utf-8", errors="replace").rstrip("\r\n")
 
 def send_line(sock, line: str):
-    sock.sendall((line + "\n").encode())
+    sock.sendall((line + "\n").encode("utf-8"))
 
 def do_list(sock):
     send_line(sock, "LIST")
@@ -30,7 +34,10 @@ def do_put(sock, path: pathlib.Path):
     size = path.stat().st_size
     send_line(sock, f"PUT {path.name} {size}")
     with open(path, "rb") as f:
-        while chunk := f.read(BUFSIZE):
+        while True:
+            chunk = f.read(BUFSIZE)
+            if not chunk:
+                break
             sock.sendall(chunk)
     res = recv_line(sock)
     print(res)
@@ -40,18 +47,19 @@ def do_get(sock, name: str, outdir: pathlib.Path):
     send_line(sock, f"GET {name}")
     first = recv_line(sock)
     if not first.startswith("OK "):
+        # server returned error string like "ERR not-found"
         print(first)
         return 1
     size = int(first.split()[1])
     dest = outdir / name
-    received = 0
+    remaining = size
     with open(dest, "wb") as f:
-        while received < size:
-            chunk = sock.recv(min(BUFSIZE, size - received))
+        while remaining > 0:
+            chunk = sock.recv(min(BUFSIZE, remaining))
             if not chunk:
                 raise ConnectionError("connection closed during download")
             f.write(chunk)
-            received += len(chunk)
+            remaining -= len(chunk)
     print(f"Downloaded to {dest} ({size} bytes)")
     return 0
 
@@ -80,9 +88,8 @@ def main():
     p_del = sub.add_parser("del")
     p_del.add_argument("name")
 
-    args = ap.parse_args()   # ✅ args is defined here
+    args = ap.parse_args()
 
-    # ✅ all logic that uses args must be inside main()
     with socket.create_connection((args.host, args.port)) as sock:
         if args.cmd == "list":
             exit(do_list(sock))
