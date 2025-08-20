@@ -80,7 +80,22 @@ def main():
     p_del = sub.add_parser("del")
     p_del.add_argument("name")
 
-    args = ap.parse_args()
+    args = ap.parse_args()   # ✅ args is defined here
 
+    # ✅ all logic that uses args must be inside main()
     with socket.create_connection((args.host, args.port)) as sock:
         if args.cmd == "list":
+            exit(do_list(sock))
+        elif args.cmd == "put":
+            if not args.path.exists():
+                print("Path does not exist")
+                exit(1)
+            exit(do_put(sock, args.path))
+        elif args.cmd == "get":
+            args.out.mkdir(parents=True, exist_ok=True)
+            exit(do_get(sock, args.name, args.out))
+        elif args.cmd == "del":
+            exit(do_del(sock, args.name))
+
+if __name__ == "__main__":
+    main()
